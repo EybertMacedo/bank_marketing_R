@@ -1,0 +1,977 @@
+---
+title: "bank_marketing"
+output: html_document
+---
+
+```{r}
+install.packages(c(
+  "dplyr",     # Manipulación de datos
+  "ggplot2",   # Visualización
+  "readr",     # Lectura de CSV
+  "caret",
+  "MASS",
+  "rpart",
+  "class",
+  "kernlab",
+  "randomForest",
+  "e1071",
+  "pROC",
+  "reshape2",
+  "gridExtra",
+  "caTools",
+  "rpart.plot"
+))
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(caret)
+library(MASS)
+library(rpart)
+library(class)
+library(kernlab)
+library(randomForest)
+library(e1071)
+library(pROC)
+library(reshape2)
+library(gridExtra)
+library(grid)
+
+```
+```{r}
+bank_data <- read.csv("bank.csv", sep = ",")
+head(bank_data,5)
+```
+```{r}
+summary(bank_data, is.numeric)
+```
+```{r}
+cat_vars <- select_if(bank_data, Negate(is.numeric))
+lapply(cat_vars, table)
+```
+
+
+```{r}
+colSums(is.na(bank_data))
+```
+```{r}
+num_vars <- bank_data[, sapply(bank_data, is.numeric)]
+
+# Convertir a formato largo
+num_data_long <- data.frame(
+  Variable = rep(names(num_vars), each = nrow(num_vars)),
+  Valor = unlist(num_vars)
+)
+
+# Graficar histogramas suavizados
+ggplot(num_data_long, aes(x = Valor, fill = Variable)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30, alpha = 0.5, color = "black") +
+  geom_density(alpha = 0.3, color = "blue", linewidth = 1) +
+  facet_wrap(~Variable, scales = "free", ncol = 3) +
+  theme_minimal() +
+  labs(
+    title = "Distribución de Variables Numéricas",
+    x = "Valor",
+    y = "Densidad"
+  ) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold")
+  )
+```
+```{r}
+# Graficar boxplots 
+ggplot(num_data_long, aes(x = Variable, y = Valor, fill = Variable)) +
+  geom_boxplot(
+    outlier.colour = "red", 
+    outlier.shape = 16,
+    outlier.size = 0.8,
+    width = 0.5
+  ) +
+  facet_wrap(~Variable, scales = "free", ncol = 3) +
+  theme_minimal(base_size = 11) +
+  labs(
+    title = "Boxplots de Variables Numéricas (Outliers)",
+    x = "Variable",
+    y = "Valor"
+  ) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 10),
+    axis.text.x = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 15, face = "bold"),
+    panel.spacing = unit(0.8, "lines")
+  )
+```
+```{r}
+outlier_percentage <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR_val <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  outliers <- sum(x < lower_bound | x > upper_bound, na.rm = TRUE)
+  perc <- (outliers / length(x)) * 100
+  return(round(perc, 2))
+}
+
+numeric_vars <- bank_data[, sapply(bank_data, is.numeric)]
+outlier_summary <- sapply(numeric_vars, outlier_percentage)
+
+sort(outlier_summary, decreasing = TRUE)
+```
+```{r}
+numeric_vars <- bank_data[, sapply(bank_data, is.numeric)]
+
+# Rremplazar outliers por NA
+replace_outliers_with_na <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR_val <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  x[ x < lower_bound | x > upper_bound ] <- NA
+  return(x)
+}
+
+bank_data_no_outliers <- as.data.frame(lapply(numeric_vars, replace_outliers_with_na))
+
+num_data_long_no_outliers <- do.call(rbind,
+  lapply(names(bank_data_no_outliers), function(var) {
+    data.frame(
+      Variable = var,
+      Valor = bank_data_no_outliers[[var]]
+    )
+  })
+)
+
+# Eliminar outliers
+num_data_long_no_outliers <- num_data_long_no_outliers[!is.na(num_data_long_no_outliers$Valor), ]
+
+ggplot(num_data_long_no_outliers, aes(x = Valor, fill = Variable)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30, alpha = 0.5, color = "black") +
+  geom_density(alpha = 0.3, color = "blue", linewidth = 1) +
+  facet_wrap(~Variable, scales = "free", ncol = 3) +
+  theme_minimal() +
+  labs(
+    title = "Distribución de Variables Numéricas (sin outliers)",
+    x = "Valor",
+    y = "Densidad"
+  ) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold")
+  )
+```
+```{r fig.height=4, fig.width=12}
+cat_vars <- bank_data[, sapply(bank_data, Negate(is.numeric))]
+
+cat_data_long <- data.frame(
+  Variable = rep(names(cat_vars), each = nrow(cat_vars)),
+  Valor = unlist(cat_vars)
+)
+
+ggplot(cat_data_long, aes(x = Valor, fill = Variable)) +
+  geom_bar(color = "black", alpha = 0.7) +
+  facet_wrap(~Variable, scales = "free", ncol = 5) +
+  theme_minimal() +
+  labs(
+    title = "Distribución de Variables Categóricas",
+    x = "Categoría",
+    y = "Frecuencia"
+  ) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    strip.text = element_text(size = 10, face = "bold")
+  )
+```
+```{r fig.height=4, fig.width=12}
+p1 <- ggplot(bank_data, aes(x = age, color = education, fill = education)) +
+  geom_density(alpha = 0.3, linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Age vs Education Level",
+    x = "Edad",
+    y = "Densidad"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    legend.title = element_blank(),
+    legend.position = "top",
+    axis.text = element_text(size = 9),
+    strip.text = element_text(size = 10, face = "bold")
+  )
+
+# --- Age vs Marital Status ---
+p2 <- ggplot(bank_data, aes(x = age, color = marital, fill = marital)) +
+  geom_density(alpha = 0.3, linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Age vs Marital Status",
+    x = "Edad",
+    y = "Densidad"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    legend.title = element_blank(),
+    legend.position = "top",
+    axis.text = element_text(size = 9),
+    strip.text = element_text(size = 10, face = "bold")
+  )
+
+# --- Job vs Age ---
+p3 <- ggplot(bank_data, aes(y = job, x = age, fill = job)) +
+  geom_boxplot(alpha = 0.7, color = "black") +
+  theme_minimal() +
+  labs(
+    title = "Job vs Age",
+    x = "Edad",
+    y = "Ocupación"
+  ) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.text = element_text(size = 9),
+    strip.text = element_text(size = 10, face = "bold")
+  )
+
+# --- Combinar los gráficos ---
+grid.arrange(
+  p1, p2, p3,
+  ncol = 3,
+  top = textGrob(
+    "Age vs Education, Marital Status y Job",
+    gp = gpar(fontsize = 20, fontface = "bold")
+  )
+)
+```
+```{r fig.height=4, fig.width=12}
+bank_data <- bank_data %>%
+  mutate(
+    marital_edu = case_when(
+      marital == "single" & education == "primary" ~ "single+primary",
+      marital == "married" & education == "primary" ~ "married+primary",
+      marital == "divorced" & education == "primary" ~ "divorced+primary",
+      marital == "single" & education == "secondary" ~ "single+secondary",
+      marital == "married" & education == "secondary" ~ "married+secondary",
+      marital == "divorced" & education == "secondary" ~ "divorced+secondary",
+      marital == "single" & education == "tertiary" ~ "single+tertiary",
+      marital == "married" & education == "tertiary" ~ "married+tertiary",
+      marital == "divorced" & education == "tertiary" ~ "divorced+tertiary",
+      TRUE ~ NA_character_
+    )
+  )
+
+# --- Agrupar por marital_edu y calcular mediana de balance ---
+marital_edu_groups <- bank_data %>%
+  group_by(marital_edu) %>%
+  summarise(balance_median = median(balance, na.rm = TRUE)) %>%
+  arrange(desc(balance_median))
+
+# --- Calcular porcentaje de default == "yes" ---
+default_yes <- bank_data %>%
+  filter(default == "yes") %>%
+  count(marital_edu, name = "count_yes")
+
+default_no <- bank_data %>%
+  filter(default == "no") %>%
+  count(marital_edu, name = "count_no")
+
+default_yes_perc <- default_yes %>%
+  full_join(default_no, by = "marital_edu") %>%
+  mutate(
+    count_yes = ifelse(is.na(count_yes), 0, count_yes),
+    count_no = ifelse(is.na(count_no), 0, count_no),
+    `default percentage` = (count_yes / (count_yes + count_no)) * 100
+  ) %>%
+  arrange(desc(`default percentage`))
+
+# --- Calcular porcentaje de loan == "yes" ---
+loan_yes <- bank_data %>%
+  filter(loan == "yes") %>%
+  count(marital_edu, name = "count_yes")
+
+loan_no <- bank_data %>%
+  filter(loan == "no") %>%
+  count(marital_edu, name = "count_no")
+
+loan_yes_perc <- loan_yes %>%
+  full_join(loan_no, by = "marital_edu") %>%
+  mutate(
+    count_yes = ifelse(is.na(count_yes), 0, count_yes),
+    count_no = ifelse(is.na(count_no), 0, count_no),
+    `loan percentage` = (count_yes / (count_yes + count_no)) * 100
+  ) %>%
+  arrange(desc(`loan percentage`))
+
+# --- Crear clusters de edad ---
+bank_data <- bank_data %>%
+  mutate(
+    age_cluster = case_when(
+      age < 30 ~ "Joven (<30)",
+      age >= 30 & age < 45 ~ "Adulto Joven (30-44)",
+      age >= 45 & age < 60 ~ "Adulto (45-59)",
+      TRUE ~ "Mayor (60+)"
+    )
+  )
+
+# --- 1. Housing (Count) vs Marital+Education ---
+p1 <- ggplot(bank_data, aes(x = housing, fill = marital_edu)) +
+  geom_bar(position = "stack") +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Housing (Count) vs Marital+Education",
+    x = "Housing Loan",
+    y = "Conteo"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "none",
+    axis.text.x = element_text(size = 9)
+  )
+
+# --- 2. Default (Yes Percentage) vs Marital+Education ---
+p2 <- ggplot(default_yes_perc, aes(x = reorder(marital_edu, -`default percentage`), 
+                                   y = `default percentage`, fill = marital_edu)) +
+  geom_col() +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Default (Yes %) vs Marital+Education",
+    x = "Marital + Education",
+    y = "Porcentaje (%)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "none"
+  )
+
+# --- 3. Loan (Yes Percentage) vs Marital+Education ---
+p3 <- ggplot(loan_yes_perc, aes(x = reorder(marital_edu, -`loan percentage`), 
+                                y = `loan percentage`, fill = marital_edu)) +
+  geom_col() +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Loan (Yes %) vs Marital+Education",
+    x = "Marital + Education",
+    y = "Porcentaje (%)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "none"
+  )
+
+# --- Combinar todos los gráficos ---
+grid.arrange(
+  p1, p2, p3,
+  ncol = 3,
+  top = textGrob(
+    "Age Clusters vs Education, Marital Status and Financial Variables",
+    gp = gpar(fontsize = 15, fontface = "bold", col = "black")
+  )
+)
+
+```
+
+```{r fig.height=4, fig.width=12}
+# --- Agrupar por marital_edu y calcular mediana de balance ---
+marital_edu_groups <- bank_data %>%
+  group_by(marital_edu) %>%
+  summarise(balance_median = median(balance, na.rm = TRUE)) %>%
+  arrange(desc(balance_median))
+
+# --- Calcular porcentaje de default == "yes" ---
+default_yes <- bank_data %>%
+  filter(default == "yes") %>%
+  count(marital_edu, name = "count_yes")
+
+default_no <- bank_data %>%
+  filter(default == "no") %>%
+  count(marital_edu, name = "count_no")
+
+default_yes_perc <- default_yes %>%
+  full_join(default_no, by = "marital_edu") %>%
+  mutate(
+    count_yes = ifelse(is.na(count_yes), 0, count_yes),
+    count_no = ifelse(is.na(count_no), 0, count_no),
+    `default percentage` = (count_yes / (count_yes + count_no)) * 100
+  ) %>%
+  arrange(desc(`default percentage`))
+
+# --- Calcular porcentaje de loan == "yes" ---
+loan_yes <- bank_data %>%
+  filter(loan == "yes") %>%
+  count(marital_edu, name = "count_yes")
+
+loan_no <- bank_data %>%
+  filter(loan == "no") %>%
+  count(marital_edu, name = "count_no")
+
+loan_yes_perc <- loan_yes %>%
+  full_join(loan_no, by = "marital_edu") %>%
+  mutate(
+    count_yes = ifelse(is.na(count_yes), 0, count_yes),
+    count_no = ifelse(is.na(count_no), 0, count_no),
+    `loan percentage` = (count_yes / (count_yes + count_no)) * 100
+  ) %>%
+  arrange(desc(`loan percentage`))
+
+# --- Housing (Count) vs Marital+Education ---
+p1 <- ggplot(bank_data, aes(x = housing, fill = marital_edu)) +
+  geom_bar(position = "stack") +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Housing (Count) vs Marital+Education",
+    x = "Housing Loan",
+    y = "Conteo"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+    legend.position = "none",
+    axis.text.x = element_text(size = 9)
+  )
+
+# --- Default (Yes %) vs Marital+Education ---
+p2 <- ggplot(default_yes_perc, aes(x = reorder(marital_edu, -`default percentage`),
+                                   y = `default percentage`, fill = marital_edu)) +
+  geom_col() +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Default (Yes %) vs Marital+Education",
+    x = "Marital + Education",
+    y = "Porcentaje (%)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+    legend.position = "none"
+  )
+
+# --- Loan (Yes %) vs Marital+Education ---
+p3 <- ggplot(loan_yes_perc, aes(x = reorder(marital_edu, -`loan percentage`),
+                                y = `loan percentage`, fill = marital_edu)) +
+  geom_col() +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Loan (Yes %) vs Marital+Education",
+    x = "Marital + Education",
+    y = "Porcentaje (%)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+    legend.position = "none"
+  )
+
+# --- Combinar los gráficos ---
+grid.arrange(
+  p1, p2, p3,
+  ncol = 3,
+  top = textGrob(
+    "Marital Status + Education Clusters vs default y prestamo",
+    gp = gpar(fontsize = 18, fontface = "bold")
+  )
+)
+```
+
+```{r fig.height=4, fig.width=12}
+marital_edu_groups <- bank_data %>%
+  group_by(marital_edu) %>%
+  summarise(balance = median(balance, na.rm = TRUE)) %>%
+  arrange(desc(balance))
+
+# Agrupar por job
+job_groups <- bank_data %>%
+  group_by(job) %>%
+  summarise(balance = median(balance, na.rm = TRUE)) %>%
+  arrange(desc(balance))
+
+# --- Agrupar por age_cluster ---
+age_balance_groups <- bank_data %>%
+  group_by(age_cluster) %>%
+  summarise(balance = median(balance, na.rm = TRUE)) %>%
+  arrange(desc(balance))
+
+# Balance vs Marital Status + Education
+p1 <- ggplot(marital_edu_groups, aes(x = reorder(marital_edu, -balance), y = balance, fill = marital_edu)) +
+  geom_col() +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Balance vs Marital Status + Education",
+    x = "Marital + Education",
+    y = "Balance (Mediana)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "none"
+  )
+
+# Balance vs Job
+p2 <- ggplot(job_groups, aes(x = reorder(job, -balance), y = balance, fill = job)) +
+  geom_col() +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Balance vs Job",
+    x = "Job",
+    y = "Balance (Mediana)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "none"
+  )
+
+# Balance vs Age Cluster
+p3 <- ggplot(age_balance_groups, aes(x = reorder(age_cluster, -balance), y = balance, fill = age_cluster)) +
+  geom_col() +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Balance vs Age Cluster",
+    x = "Age Cluster",
+    y = "Balance (Mediana)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "none"
+  )
+
+# Mostrar los tres gráficos
+grid.arrange(
+  p1, p2, p3,
+  ncol = 3,
+  top = textGrob(
+    "Balance vs Job, Marital Status + Education and Age Cluster",
+    gp = gpar(fontsize = 16, fontface = "bold")
+  )
+)
+
+```
+```{r fig.height=4, fig.width=12}
+outlier_imputer <- function(data, features) {
+  data_out <- data
+  
+  for (col in features) {
+    Q1 <- quantile(data_out[[col]], 0.25, na.rm = TRUE)
+    Q3 <- quantile(data_out[[col]], 0.75, na.rm = TRUE)
+    IQR <- Q3 - Q1
+    lowerL <- Q1 - 1.5 * IQR
+    higherL <- Q3 + 1.5 * IQR
+    
+    # Reemplazar outliers por límites
+    data_out[[col]] <- pmin(pmax(data_out[[col]], lowerL), higherL)
+  }
+  
+  return(data_out)
+}
+
+# Columnas a procesar
+features <- c("age", "balance", "day", "duration", "campaign", "pdays", "previous")
+
+# Aplicar función
+capped_data <- outlier_imputer(bank_data, features)
+
+# Graficar antes y después para "duration"
+p1 <- ggplot(bank_data, aes(x = duration)) +
+  geom_density(color = "blue", size = 1) +
+  labs(
+    title = "Distribución de Duration Antes del Clamping",
+    x = "Duration",
+    y = "Densidad"
+  ) +
+  theme_minimal(base_size = 12)
+
+p2 <- ggplot(capped_data, aes(x = duration)) +
+  geom_density(color = "red", size = 1) +
+  labs(
+    title = "Distribución de Duration Después del Clamping",
+    x = "Duration",
+    y = "Densidad"
+  ) +
+  theme_minimal(base_size = 12)
+
+grid.arrange(p1, p2, ncol = 2, 
+             top = textGrob(
+               "Comparación de Distribuciones Antes y Después del Clamping",
+               gp = gpar(fontsize = 14, fontface = "bold")
+             ))
+```
+```{r}
+library(dplyr)
+
+capped_data <- capped_data %>%
+  dplyr::select(-education, -marital, -age_cluster)
+
+```
+
+```{r}
+head(capped_data)
+
+```
+
+```{r}
+data_feature <- capped_data
+
+# Label encoding para variables categóricas
+for (col in names(data_feature)) {
+  if (is.character(data_feature[[col]]) || is.factor(data_feature[[col]])) {
+    data_feature[[col]] <- as.numeric(as.factor(data_feature[[col]]))
+  }
+}
+
+# Eliminar filas con valores NA
+data_feature <- na.omit(data_feature)
+
+# --- Dividir variables predictoras y target
+X <- data_feature[, setdiff(names(data_feature), "deposit")]
+y <- as.factor(data_feature$deposit)
+
+# Modelo Random Forest
+set.seed(1)
+random_forest <- randomForest(
+  x = X,
+  y = y,
+  ntree = 500,
+  maxnodes = 100,
+  importance = TRUE
+)
+
+# --- Importancia de las variables ---
+importances <- data.frame(
+  feature = rownames(random_forest$importance),
+  importance = round(random_forest$importance[, 1], 3)
+) %>%
+  arrange(desc(importance))
+
+# --- Mostrar resultados ---
+print(importances)
+```
+```{r}
+library(ggplot2)
+
+# Filtrar solo las variables con importancia > 0.025
+important_features <- importances %>%
+  filter(importance > 0.005)
+
+# Crear el gráfico
+ggplot(important_features, aes(x = reorder(feature, -importance), y = importance, fill = importance)) +
+  geom_col(color = "black") +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Feature Importances > 0.005",
+    x = "Feature",
+    y = "Relative Importance"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 18),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "gray90", color = NA)
+  )
+```
+```{r fig.height=4, fig.width=12}
+
+# Calcular matriz de correlación
+corr_matrix <- cor(X, use = "complete.obs", method = "pearson")
+
+# Convertir a formato largo para ggplot
+corr_long <- melt(corr_matrix)
+
+# Heatmap
+ggplot(corr_long, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 4) +
+  theme_minimal(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   hjust = 1)) +
+  ggtitle("Correlation Heatmap") +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.background = element_rect(fill = "lightsteelblue"))
+
+```
+```{r}
+capped_data$pdays <- NULL
+capped_data$previous <- NULL
+
+data_feature$pdays <- NULL
+data_feature$previous <- NULL
+
+colnames(capped_data)
+colnames(data_feature)
+```
+```{r}
+
+# --- Separar X e y ---
+X <- capped_data[, names(capped_data) != "deposit"]
+y <- capped_data$deposit
+
+# -Dividir en entrenamiento y prueba (70%-30%)
+set.seed(42)
+library(caTools)
+split <- sample.split(y, SplitRatio = 0.7)
+
+X_train <- X[split == TRUE, ]
+X_test  <- X[split == FALSE, ]
+
+y_train <- y[split == TRUE]
+y_test  <- y[split == FALSE]
+
+dim(X_train); dim(X_test)
+length(y_train); length(y_test)
+
+# Label encoding para la variable objetivo
+y_train <- ifelse(y_train == "yes", 1, 0)
+y_test  <- ifelse(y_test == "yes", 1, 0)
+
+# Identificar variables categóricas
+cat_cols <- names(X_train)[sapply(X_train, is.character)]
+
+# Separar binarias y multiclase
+bin_cols   <- c()
+multi_cols <- c()
+
+for(col in cat_cols){
+  n_unique <- length(unique(X_train[[col]]))
+  cat("feature =", col, "; cardinality =", n_unique, "\n")
+  if(n_unique <= 2){
+    bin_cols <- c(bin_cols, col)
+  } else {
+    multi_cols <- c(multi_cols, col)
+  }
+}
+
+cat("\nBinary columns:", bin_cols, "\n")
+cat("Multi-class columns:", multi_cols, "\n")
+
+# Label encoding para las columnas binarias
+for(col in bin_cols){
+  X_train[[col]] <- ifelse(X_train[[col]] == "yes", 1, 0)
+  X_test[[col]]  <- ifelse(X_test[[col]] == "yes", 1, 0)
+}
+```
+```{r}
+# Función para reemplazar clases raras (< 0.05) por 'other'
+remove_005 <- function(train, test, column) {
+  prop_table <- prop.table(table(train[[column]]))
+  
+  # Detectar clases con frecuencia < 0.05
+  rare_classes <- names(prop_table[prop_table < 0.05])
+  
+  # Reemplazar en train y test
+  train[[column]][train[[column]] %in% rare_classes] <- "other"
+  test[[column]][test[[column]] %in% rare_classes]   <- "other"
+  
+  return(list(train = train, test = test))
+}
+
+# Aplicar la función a todas las columnas multiclase
+for(col in multi_cols){
+  res <- remove_005(X_train, X_test, col)
+  X_train <- res$train
+  X_test  <- res$test
+}
+
+# Revisar proporciones de cada categoría
+for(col in multi_cols){
+  prop <- prop.table(table(X_train[[col]]))
+  print(prop)
+  cat("\n")
+}
+
+# Revisar columnas con NA
+list_nulls <- names(X_train)[sapply(X_train, function(x) any(is.na(x)))]
+list_nulls
+
+# Imputar NA con 'other' en 'marital_edu'
+if("marital_edu" %in% list_nulls){
+  X_train$marital_edu[is.na(X_train$marital_edu)] <- "other"
+  X_test$marital_edu[is.na(X_test$marital_edu)]   <- "other"
+}
+
+# Confirmar que no hay NA
+list_nulls <- names(X_train)[sapply(X_train, function(x) any(is.na(x)))]
+list_nulls
+```
+```{r}
+# --- Separar las columnas numéricas/binarizadas ---
+num_train <- X_train[, !(names(X_train) %in% multi_cols)]
+num_test  <- X_test[,  !(names(X_test)  %in% multi_cols)]
+
+# --- One-hot encoding para las columnas multiclase ---
+OHE_train <- as.data.frame(model.matrix(~ . -1, data = X_train[, multi_cols]))
+OHE_test  <- as.data.frame(model.matrix(~ . -1, data = X_test[, multi_cols]))
+
+# --- Combinar columnas numéricas/binarizadas con las one-hot encoded ---
+OHE_X_train <- cbind(OHE_train, num_train)
+OHE_X_test  <- cbind(OHE_test, num_test)
+
+# --- Revisar dimensiones ---
+dim(OHE_X_train)
+dim(OHE_X_test)
+```
+```{r}
+# --- Identificar columnas numéricas ---
+num_features <- names(OHE_X_train)[sapply(OHE_X_train, is.numeric)]
+
+# --- Escalado Min-Max usando caret ---
+library(caret)
+
+scaler <- preProcess(OHE_X_train[, num_features], method = c("range"))
+
+OHE_X_train[, num_features] <- predict(scaler, OHE_X_train[, num_features])
+OHE_X_test[, num_features]  <- predict(scaler, OHE_X_test[, num_features])
+
+# --- Revisar primeras filas ---
+head(OHE_X_train)
+```
+```{r}
+library(MASS)         # LDA, QDA
+library(class)        # KNN
+library(rpart)        # CART
+library(e1071)        # SVM
+library(randomForest) # Random Forest
+library(caret)        # Confusion Matrix
+
+#  Preparar datos
+y_train_factor <- factor(y_train)
+y_test_factor  <- factor(y_test)
+
+# Reducir colinealidad usando PCA para QDA
+pca <- prcomp(OHE_X_train, center = TRUE, scale. = TRUE)
+# Elegir primeros componentes que expliquen ~95% de la varianza
+cumvar <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
+num_pc <- min(which(cumvar >= 0.95))
+X_train_pca <- pca$x[, 1:num_pc]
+X_test_pca  <- predict(pca, newdata = OHE_X_test)[, 1:num_pc]
+
+# LDA
+lda_model <- lda(X_train_pca, grouping = y_train_factor)
+lda_pred  <- predict(lda_model, X_test_pca)$class
+lda_cm    <- confusionMatrix(lda_pred, y_test_factor)
+print("LDA Confusion Matrix:")
+print(lda_cm)
+
+# QDA
+qda_model <- qda(X_train_pca, grouping = y_train_factor)
+qda_pred  <- predict(qda_model, X_test_pca)$class
+qda_cm    <- confusionMatrix(qda_pred, y_test_factor)
+print("QDA Confusion Matrix:")
+print(qda_cm)
+
+# CART
+cart_model <- rpart(y_train_factor ~ ., data = data.frame(X_train_pca, y_train_factor))
+cart_pred  <- predict(cart_model, data.frame(X_test_pca), type = "class")
+cart_cm    <- confusionMatrix(cart_pred, y_test_factor)
+print("CART Confusion Matrix:")
+print(cart_cm)
+
+# KNN
+k <- 5
+knn_pred <- knn(train = X_train_pca, test = X_test_pca, cl = y_train_factor, k = k)
+knn_cm   <- confusionMatrix(knn_pred, y_test_factor)
+print("KNN Confusion Matrix:")
+print(knn_cm)
+
+# SVM
+svm_model <- svm(X_train_pca, y_train_factor, kernel = "radial", probability = TRUE)
+svm_pred  <- predict(svm_model, X_test_pca)
+svm_cm    <- confusionMatrix(svm_pred, y_test_factor)
+print("SVM Confusion Matrix:")
+print(svm_cm)
+
+# Random Forest
+rf_model <- randomForest(X_train_pca, y_train_factor, ntree = 500, importance = TRUE)
+rf_pred  <- predict(rf_model, X_test_pca)
+rf_cm    <- confusionMatrix(rf_pred, y_test_factor)
+print("Random Forest Confusion Matrix:")
+print(rf_cm)
+
+# Comparar Accuracy
+accuracy <- c(
+  LDA = lda_cm$overall['Accuracy'],
+  QDA = qda_cm$overall['Accuracy'],
+  CART = cart_cm$overall['Accuracy'],
+  KNN = knn_cm$overall['Accuracy'],
+  SVM = svm_cm$overall['Accuracy'],
+  RF = rf_cm$overall['Accuracy']
+)
+print("Model Accuracies:")
+print(accuracy)
+
+
+```
+```{r}
+# Convertir a data frame
+accuracy_df <- data.frame(
+  Model = names(accuracy),
+  Accuracy = as.numeric(accuracy)
+)
+
+# Gráfico de barras
+ggplot(accuracy_df, aes(x = reorder(Model, Accuracy), y = Accuracy, fill = Model)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = round(Accuracy, 3)), vjust = -0.5) +
+  ylim(0,1) +
+  labs(
+    title = "Comparación de Accuracy entre Modelos",
+    x = "Modelo",
+    y = "Accuracy"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+```{r}
+plot_confusion <- function(pred, true, title = "Confusion Matrix") {
+  cm <- confusionMatrix(as.factor(pred), as.factor(true))
+  cm_table <- as.data.frame(cm$table)
+  colnames(cm_table) <- c("Prediction", "Reference", "Freq")
+  
+  ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Freq), size = 6) +
+    scale_fill_gradient(low = "lightyellow", high = "steelblue") +
+    labs(title = title, x = "Actual", y = "Predicted") +
+    theme_minimal(base_size = 14) +
+    theme(plot.title = element_text(face = "bold", hjust = 0.5))
+}
+
+# --- Graficar para Random Forest ---
+plot_confusion(rf_pred, y_test, "Random Forest Confusion Matrix")
+
+# --- Graficar para SVM ---
+plot_confusion(svm_pred, y_test, "SVM Confusion Matrix")
+
+```
+```{r}
+# Crear un data.frame con las predicciones y el valor real
+X_test_original <- X_test[sample_idx, ]  # Seleccionamos los mismos 20 índices aleatorios
+
+# Crear un data.frame con predicciones y registros originales
+pred_sample_full <- cbind(
+  X_test_original,
+  Actual = y_test_factor[sample_idx],
+  SVM = predict(svm_model, X_test_pca[sample_idx, ]),
+  RF  = predict(rf_model, X_test_pca[sample_idx, ])
+)
+
+# Mostrar el resultado
+print(pred_sample_full)
+
+```
+
