@@ -1,6 +1,6 @@
-# 🏦 DATACARD - Bank Marketing Dataset Analysis
+# DATACARD - Bank Marketing Dataset Analysis
 
-## 📋 Contexto del Proyecto
+## Contexto del Proyecto
 
 El objetivo principal de este proyecto es encontrar las mejores estrategias para mejorar la próxima campaña de marketing de una institución financiera. Para lograr esto, se analiza la última campaña realizada por el banco para identificar patrones que permitan desarrollar estrategias futuras más efectivas.
 
@@ -10,7 +10,7 @@ El problema se aborda como una tarea de **clasificación**, donde la variable ob
 
 > [Moro et al., 2014] S. Moro, P. Cortez and P. Rita. A Data-Driven Approach to Predict the Success of Bank Telemarketing. Decision Support Systems, Elsevier, 62:22-31, June 2014
 
-## 🛠️ Tecnologías y Librerías
+##  Tecnologías y Librerías
 
 El análisis fue realizado utilizando **R**. Las siguientes librerías son necesarias para replicar el estudio:
 
@@ -23,7 +23,7 @@ install.packages(c("dplyr", "ggplot2", "readr", "caret", "MASS", "rpart", "class
 * **Machine Learning:** `caret`, `MASS`, `rpart`, `class`, `kernlab`, `randomForest`, `e1071`
 * **Métricas:** `pROC`
 
-## 📊 Descripción del Dataset
+## Descripción del Dataset
 
 El dataset contiene **11,162 registros** y las siguientes variables clave:
 
@@ -46,7 +46,7 @@ El dataset contiene **11,162 registros** y las siguientes variables clave:
 | **poutcome** | Resultado de la campaña anterior. | Categórico |
 | **deposit** | **Variable Objetivo** (Suscripción al depósito). | Binario |
 
-## 🔍 Análisis Exploratorio de Datos (EDA)
+## Análisis Exploratorio de Datos (EDA)
 
 Se realizaron visualizaciones extensivas para entender el comportamiento de los clientes.
 
@@ -73,7 +73,7 @@ Se realizaron visualizaciones extensivas para entender el comportamiento de los 
   * Manejo de valores raros (<5%) agrupándolos en la categoría "other".
 * **Escalado:** Se utilizó escalado Min-Max para normalizar variables numéricas.
 
-## 🤖 Modelado Predictivo
+## Modelado Predictivo
 
 Se probaron múltiples algoritmos de clasificación dividiendo los datos en **70% Entrenamiento** y **30% Prueba**.
 
@@ -95,7 +95,7 @@ El modelo **Random Forest** demostró ser uno de los más robustos, destacando l
 3. **Month**
 4. **Age**
 
-## 🚀 Conclusiones y Estrategia
+## Conclusiones y Estrategia
 
 Para futuras campañas, la institución financiera debería:
 
@@ -103,7 +103,3 @@ Para futuras campañas, la institución financiera debería:
 2. **Personalizar por Historial:** Los clientes que tuvieron éxito en campañas anteriores (`poutcome = success`) tienen alta probabilidad de conversión.
 3. **Gestión de Llamadas:** Dado que la `duration` es vital, las estrategias de guion deben enfocarse en mantener el interés del cliente en los primeros segundos para extender la interacción.
 4. **Segmentación por Educación/Estado Civil:** Los solteros con educación superior tienen menos carga de préstamos y mayor saldo, siendo un target ideal para productos de inversión.
-
-## 📄 Licencia
-
-Este dataset está bajo licencia **CC0: Public Domain**.
